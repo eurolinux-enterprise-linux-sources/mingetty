@@ -1,0 +1,130 @@
+--- mingetty-0.9.4/mingetty.c.autologin	Sun Nov 26 10:54:13 2000
++++ mingetty-0.9.4/mingetty.c	Sun Nov 26 10:28:29 2000
+@@ -49,6 +49,20 @@
+ #endif
+ 
+ #ifdef linux
++/* Autologin stuff.  Currently Linux-specific, since there's no
++   standard way of getting the system boot time.  The kernel.h and the
++   sysinfo prototype are used to get the system uptime under Linux. */
++#include <linux/kernel.h>
++int sysinfo(struct sysinfo *info);
++
++/* AUTO_LAST points to a timestamp file used to limit autologins to
++   one per system boot. */
++#define AUTO_LAST "/var/log/autologin"
++
++/* AUTO_TTY is the tty on which autologins will be accepted.  If set
++   to an empty string, autologins will be accepted on any tty. */
++#define AUTO_TTY "tty1"
++
+ #include <sys/param.h>
+ #define USE_SYSLOG
+ #endif
+@@ -80,7 +94,8 @@
+ static int noclear = 0;
+ /* Print the whole string of gethostname() instead of just until the next "." */
+ static int longhostname = 0;
+-
++/* If supplied, attempt an automatic login with this username. */
++static char *autologin_name = NULL;
+ 
+ /*
+  * output error messages
+@@ -385,6 +400,62 @@
+ 	return logname;
+ }
+ 
++/*
++ * autologin_ok -- returns 1 if it's okay to auto-login when:
++ *   this login is from /dev/tty1; and
++ *   there was a login name passed with the --autologin option; and
++ *   the autologin_name contains only "nice" characters; and
++ *   this is the first autologin attempt since the last boot; 
++ * return 0 otherwise.
++ */
++static int autologin_ok(void)
++{
++	char c, *cp;
++	int stat_err, fd;
++	struct sysinfo info;
++	struct stat sbuf;
++
++	/* Autologins are restricted to AUTO_TTY if non-empty. */
++	if (AUTO_TTY[0] && strcmp(tty, AUTO_TTY))
++		return 0;
++
++	/* An all-alphanumeric autologin name must be supplied. */
++	if (autologin_name == NULL || autologin_name[0] == '\0')
++		return 0;
++	for (cp = autologin_name; (c = *cp); cp++)
++		if (!isalnum(c) && c != '_')
++			return 0;
++
++	/* Get the uptime in info.uptime, and the last autologin time
++           in sbuf.st_mtime. */
++	sysinfo(&info);
++	stat_err = stat(AUTO_LAST, &sbuf);
++
++	/* If a stat error other than "no such file" occurs, I don't
++           know what went wrong, so I'll proceed with caution by
++           denying the autologin request. */
++	if (stat_err && errno != ENOENT)
++		return 0;
++
++	/* If there's been an autologin granted since the last boot,
++           deny this and any subsequent attempts.  Note that this test
++           is skipped if the AUTO_LAST file doesn't exist. */
++	if (!stat_err && time(NULL) - info.uptime < sbuf.st_mtime)
++		return 0;
++
++	/* Create the AUTO_LAST file.  The mtime of this file provides
++           a persistent record of the last time that an autologin
++           request was granted.  Deny the autologin request if either
++           the file open or file close fails. */
++	if ((fd=open(AUTO_LAST, O_WRONLY | O_CREAT | O_TRUNC, 0644)) < 0)
++		return 0;
++	if (close(fd) != 0)
++		return 0;
++
++	/* All tests are okay, so grant the autologin request. */
++	return 1;
++}
++
+ static void usage (void)
+ {
+ 	error ("usage: '%s tty' with e.g. tty=tty1", progname);
+@@ -393,6 +464,7 @@
+ static struct option const long_options[] = {
+ 	{ "noclear", no_argument, &noclear, 1},
+ 	{ "long-hostname", no_argument, &longhostname, 1},
++	{ "autologin", required_argument, NULL, 'a'},
+ 	{ 0, 0, 0, 0 }
+ };
+ 
+@@ -418,6 +490,9 @@
+ 		switch (c) {
+ 			case 0:
+ 				break;
++			case 'a':
++				autologin_name = optarg;
++				break;
+ 			default:
+ 				usage ();
+ 		}
+@@ -438,9 +513,12 @@
+ 	/* flush input and output queues, important for modems */
+ 	ioctl (0, TCFLSH, 2);
+ 
+-	while ((logname = get_logname ()) == 0);
+-
+-	execl (_PATH_LOGIN, _PATH_LOGIN, "--", logname, NULL);
++	if (autologin_ok()) {
++		execl (_PATH_LOGIN, _PATH_LOGIN, "-f", autologin_name, NULL);
++	} else {
++		while ((logname = get_logname ()) == 0) ;
++		execl (_PATH_LOGIN, _PATH_LOGIN, "--", logname, NULL);
++	}
+ 	error ("%s: can't exec " _PATH_LOGIN ": %s", tty, sys_errlist[errno]);
+ 	exit (0);
+ }
