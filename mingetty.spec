@@ -2,11 +2,17 @@ Summary: A compact getty program for virtual consoles only
 Name: mingetty
 Version: 1.08
 License: GPLv2+
-Release: 4.1%{?dist}
+Release: 5%{?dist}
 Group: System Environment/Base
 URL: http://sourceforge.net/projects/mingetty/
 Source: http://downloads.sourceforge.net/%{name}/%{name}-%{version}.tar.gz
-Patch: mingetty-1.00-opt.patch
+Patch0: mingetty-1.00-opt.patch
+# Bug #640933
+Patch1: mingetty-1.08-check_chroot_chdir_nice.patch
+# Bug #640940
+Patch2: mingetty-1.08-limit_tty_length.patch
+# Bug #651955
+Patch3: mingetty-1.08-Allow-login-name-up-to-LOGIN_NAME_MAX-length.patch
 BuildRoot: %{_tmppath}/%{name}-root
 
 %description
@@ -16,7 +22,10 @@ lines (you should use the mgetty program in that case).
 
 %prep
 %setup -q
-%patch -p1
+%patch0 -p1 -b .opt
+%patch1 -p1 -b .chroot
+%patch2 -p1 -b .tty_length
+%patch3 -p1 -b .loginname_length
 
 %build
 make "RPM_OPTS=$RPM_OPT_FLAGS"
@@ -38,6 +47,11 @@ rm -rf $RPM_BUILD_ROOT
 %{_mandir}/man8/mingetty.*
 
 %changelog
+* Mon Jun 06 2011 Petr Pisar <ppisar@redhat.com> - 1.08-5
+- Check chroot(), chdir(), and nice() (bug #640933)
+- Limit TTY name length to prevent buffer overflow (bug #640940)
+- Allow login name up to LOGIN_NAME_MAX length (bug #651955)
+
 * Mon Nov 30 2009 Dennis Gregorovic <dgregor@redhat.com> - 1.08-4.1
 - Rebuilt for RHEL 6
 
